@@ -16,14 +16,18 @@ jupyter:
 from requests_oauthlib import OAuth2Session
 from oauthlib.oauth2 import BackendApplicationClient
 from requests.auth import HTTPBasicAuth
-import json
-from time import sleep
+import time
 import os
 from urllib.parse import urljoin
 import pandas as pd
 import datetime
 from datetime import datetime as dt
 from matplotlib import pyplot as plt
+from tqdm.auto import tqdm
+import re
+
+CAMPUS = "Fremont"
+REQUESTS_PER_SECOND = 2
 ```
 
 # Storing Secrets in Environment Variables
@@ -119,9 +123,83 @@ plt.title(f"Login time by host from {start_approx} to {end_approx}");
 ```{python}
 res = oauth.get(urljoin(APIV2, f'campus'))
 try:
-    fremont_campus_id = next(campus.get("id") for campus in res.json() if campus.get("name") == "Fremont")
+    our_campus_id = next(campus.get("id") for campus in res.json() if campus.get("name") == CAMPUS)
 except StopIteration:
-    print("Can't find Fremont campus ID")
+    print(f"Can't find {CAMPUS} campus ID")
     raise
-res = oauth.get(urljoin(APIV2, f'campus/{fremont_campus_id}/users'))
+res = oauth.get(urljoin(APIV2, f'campus/{our_campus_id}/users'))
+print(f'There are {res.headers["X-Total"]} students in the registration history of the {CAMPUS} campus.')
+```
+
+```{python}
+res = oauth.get(urljoin(APIV2, f'campus/{our_campus_id}/locations'))
+```
+
+```{python}
+total_sessions = res.headers["X-Total"]
+oldest_page = res.headers["X-Page"]
+sessions_per_page = res.headers["X-Per-Page"]
+```
+
+That's quite a lot.  Our default rate-limit also sucks.
+[Although the API documentation indicates it might be possible](https://api.intra.42.fr/apidoc/guides/specification#pagination), asking for more (or fewer) than 30 items doesn't seem to work at time of writing.
+
+```{python}
+TIME_BETWEEN_REQUESTS = 1/REQUESTS_PER_SECOND
+
+sessions = pd.DataFrame.from_dict(res.json())
+page = 1
+while (page < 100):
+    start_time = time.time()
+    try:
+        res = oauth.get(urljoin(APIV2, f'campus/{our_campus_id}/locations?page={page}'))
+    except Exception as e:
+        print(f"Failed with exception:{e}\n\nbreaking to preserve whatever data we've got so far")
+        break
+    if (res.ok):
+        print(f"grabbed page {page}")
+        sessions = sessions.append(pd.DataFrame.from_dict(res.json()), ignore_index=True)
+        page += 1
+        if (int(res.headers['X-Hourly-RateLimit-Remaining']) < 1):
+            import ipdb; ipdb.set_trace()
+    else:
+        print(f"request failed: {res}")
+    elapsed_time = time.time() - start_time
+    time.sleep(max(TIME_BETWEEN_REQUESTS - elapsed_time, 0))   
+```
+
+```{python}
+sessions = pd.read_pickle('sessions')
+
+def strptime_wrapper(string, args):
+    try:
+        return dt.strptime(string, args)
+    except TypeError:
+        return None
+
+sessions.begin_at = sessions.begin_at.apply(strptime_wrapper, args=(fmt,))
+sessions.end_at = sessions.end_at.apply(strptime_wrapper, args=(fmt,))
+
+```
+
+```{python}
+mask_by_zone = {n : sessions.host.apply(lambda x: x[3] == n) for n in ['2','3','4']}
+```
+
+```{python}
+def mean_by_zone(n):
+    s = sessions[mask_by_zone[str(n)]]
+    d = s.end_at - s.begin_at
+    return d.mean()
+
+
+```
+
+```{python}
+out_fmt = '%b %d'
+
+end = sessions.end_at.max().strftime(out_fmt)
+begin = sessions.begin_at.min().strftime(out_fmt)
+print(f"from {begin} to {end}:")
+[print(f"Mean session duration for zone {z}: {(mean_by_zone(z).seconds/3600):.2f} hrs") for z in [2,3,4]]
 ```
