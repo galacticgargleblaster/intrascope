@@ -1,0 +1,5 @@
+jupyter
+jupytext
+pandas
+matplotlib
+requests_oauthlib
