@@ -1,0 +1,127 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.0'
+      jupytext_version: 1.0.4
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+from requests_oauthlib import OAuth2Session
+from oauthlib.oauth2 import BackendApplicationClient
+from requests.auth import HTTPBasicAuth
+import json
+from time import sleep
+import os
+from urllib.parse import urljoin
+import pandas as pd
+import datetime
+from datetime import datetime as dt
+from matplotlib import pyplot as plt
+```
+
+# Storing Secrets in Environment Variables
+
+While there exist better ways of storing secrets, this one is the bare minimum needed to distribute a notebook for public use.
+
+1. Create a file called `.env`, and copy your API keys into it like so:
+
+        INTRA_UID=fffffffffffffffffffffffffffffff
+        INTRA_SECRET=fffffffffffffffffffffffffffff
+
+2. You may then export the environment variables so that they're available for the jupyter notebook server to access
+`export `cat .env` && jupyter notebook`
+
+
+```{python}
+client_id = os.environ['INTRA_UID']
+client_secret = os.environ['INTRA_SECRET']
+
+URL_BASE = 'https://api.intra.42.fr/'
+APIV2 = urljoin(URL_BASE, 'v2/')
+
+token_url = urljoin(URL_BASE, 'oauth/token')
+auth = HTTPBasicAuth(client_id, client_secret)
+client = BackendApplicationClient(client_id=client_id)
+oauth = OAuth2Session(client=client)
+token_info = oauth.fetch_token(token_url=token_url, auth=auth, client_id=client_id, client_secret=client_secret)
+token =  token_info["access_token"]
+```
+
+# Getting to know the place
+
+Let's have a look at your last 30 logins
+
+```{python}
+YOU = os.environ['USER']
+res = oauth.get(urljoin(APIV2, f'users/{YOU}/locations'))
+```
+
+```{python}
+logins = pd.DataFrame.from_dict(res.json())
+logins[0:5]
+```
+
+The session begin/end times are recorded in ISO 8601 datetime format.  The ['Z' means it's in UTC](https://en.wikipedia.org/wiki/ISO_8601#Coordinated_Universal_Time_(UTC)) -- Coordinated Universal Time.  
+
+If the login tracking service is working properly, row 0 will show `end_at` is `None`, meaning you're currently logged in!
+
+Let's see the amount of time you've been logged in on different hosts in the last 30 sessions:
+
+```{python}
+fmt = '%Y-%m-%dT%H:%M:%S.%fZ'
+
+total_time = datetime.timedelta()
+time_by_host = {}
+duration_by_session = {}
+
+for login in logins.itertuples():
+    if not login.end_at:
+        end = dt.now()  # You're currently logged in!
+    else:
+        end = dt.strptime(login.end_at, fmt)
+    begin = dt.strptime(login.begin_at, fmt)
+    delta = end - begin
+    total_time += delta
+    duration_by_session[login.id] = delta
+    if time_by_host.get(login.host):
+        time_by_host[login.host] += delta
+    else:
+        time_by_host[login.host] = delta
+
+# Convert the datetime.timedelta objects to floats
+time_by_host = {host: t.total_seconds()/3600 for host, t in time_by_host.items()}
+duration_by_session = {session: t.total_seconds()/3600 for session, t in duration_by_session.items()}
+
+pie = plt.pie(x=list(time_by_host.values()), 
+               labels = list(time_by_host.keys()),
+               autopct='%.1f Hrs')
+out_fmt = '%b %d'
+start_approx = dt.strptime(logins.begin_at[len(logins) - 1], fmt).strftime(out_fmt)
+end_approx = dt.strptime(logins.begin_at[0], fmt).strftime(out_fmt)
+plt.title(f"Login time by host from {start_approx} to {end_approx}");
+
+```
+
+# Bigger Questions
+
+- What is the average session duration in zones 2 3 and 4?
+- What is the duration of study of cadet by zone? (avg, std dev)
+    - Level?
+- How does the number of hours logged by cadets vary by season?
+
+```{python}
+res = oauth.get(urljoin(APIV2, f'campus'))
+try:
+    fremont_campus_id = next(campus.get("id") for campus in res.json() if campus.get("name") == "Fremont")
+except StopIteration:
+    print("Can't find Fremont campus ID")
+    raise
+res = oauth.get(urljoin(APIV2, f'campus/{fremont_campus_id}/users'))
+```
