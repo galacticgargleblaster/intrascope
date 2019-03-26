@@ -40,8 +40,8 @@ While there exist better ways of storing secrets, this one is the bare minimum n
         INTRA_SECRET=fffffffffffffffffffffffffffff
 
 2. You may then export the environment variables so that they're available for the jupyter notebook server to access
-`export `cat .env` && jupyter notebook`
 
+    ``export `cat .env` && jupyter notebook``
 
 ```{python}
 client_id = os.environ['INTRA_UID']
@@ -109,7 +109,7 @@ pie = plt.pie(x=list(time_by_host.values()),
 out_fmt = '%b %d'
 start_approx = dt.strptime(logins.begin_at[len(logins) - 1], fmt).strftime(out_fmt)
 end_approx = dt.strptime(logins.begin_at[0], fmt).strftime(out_fmt)
-plt.title(f"Login time by host from {start_approx} to {end_approx}");
+plt.title(f"{YOU}'s login time by host from {start_approx} to {end_approx}");
 
 ```
 
@@ -119,6 +119,7 @@ plt.title(f"Login time by host from {start_approx} to {end_approx}");
 - What is the duration of study of cadet by zone? (avg, std dev)
     - Level?
 - How does the number of hours logged by cadets vary by season?
+- How much do different cadets in different zones move around?
 
 ```{python}
 res = oauth.get(urljoin(APIV2, f'campus'))
@@ -169,7 +170,8 @@ while (page < 100):
 ```
 
 ```{python}
-sessions = pd.read_pickle('sessions')
+sessions
+# sessions = pd.read_pickle('sessions')
 
 def strptime_wrapper(string, args):
     try:
@@ -177,8 +179,10 @@ def strptime_wrapper(string, args):
     except TypeError:
         return None
 
-sessions.begin_at = sessions.begin_at.apply(strptime_wrapper, args=(fmt,))
-sessions.end_at = sessions.end_at.apply(strptime_wrapper, args=(fmt,))
+# This is f'd: don't overwrite the dataframe in place.  Make new series instead
+
+# sessions.begin_at = sessions.begin_at.apply(strptime_wrapper, args=(fmt,))
+# sessions.end_at = sessions.end_at.apply(strptime_wrapper, args=(fmt,))
 
 ```
 
@@ -202,4 +206,12 @@ end = sessions.end_at.max().strftime(out_fmt)
 begin = sessions.begin_at.min().strftime(out_fmt)
 print(f"from {begin} to {end}:")
 [print(f"Mean session duration for zone {z}: {(mean_by_zone(z).seconds/3600):.2f} hrs") for z in [2,3,4]]
+```
+
+```{python}
+sessions
+```
+
+```{python}
+
 ```
